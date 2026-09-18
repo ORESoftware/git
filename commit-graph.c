@@ -233,6 +233,24 @@ static int prepare_commit_graph(struct repository *r)
 	return !!r->objects->commit_graph;
 }
 
+int generation_numbers_enabled(struct repository *r)
+{
+	uint32_t first_generation;
+	struct commit_graph *g;
+	if (!prepare_commit_graph(r))
+	       return 0;
+
+	g = r->objects->commit_graph;
+
+	if (!g->num_commits)
+		return 0;
+
+	first_generation = get_be32(g->chunk_commit_data +
+				    g->hash_len + 8) >> 2;
+
+	return !!first_generation;
+}
+
 static void close_commit_graph(void)
 {
 	free_commit_graph(the_repository->objects->commit_graph);
@@ -765,7 +783,7 @@ void write_commit_graph(const char *obj_dir,
 
 	count_distinct = 1;
 	for (i = 1; i < oids.nr; i++) {
-		if (oidcmp(&oids.list[i-1], &oids.list[i]))
+		if (!oideq(&oids.list[i - 1], &oids.list[i]))
 			count_distinct++;
 	}
 
@@ -779,7 +797,7 @@ void write_commit_graph(const char *obj_dir,
 	num_extra_edges = 0;
 	for (i = 0; i < oids.nr; i++) {
 		int num_parents = 0;
-		if (i > 0 && !oidcmp(&oids.list[i-1], &oids.list[i]))
+		if (i > 0 && oideq(&oids.list[i - 1], &oids.list[i]))
 			continue;
 
 		commits.list[commits.nr] = lookup_commit(the_repository, &oids.list[i]);
@@ -900,7 +918,7 @@ int verify_commit_graph(struct repository *r, struct commit_graph *g)
 	f = hashfd(devnull, NULL);
 	hashwrite(f, g->data, g->data_len - g->hash_len);
 	finalize_hashfile(f, checksum.hash, CSUM_CLOSE);
-	if (hashcmp(checksum.hash, g->data + g->data_len - g->hash_len)) {
+	if (!hasheq(checksum.hash, g->data + g->data_len - g->hash_len)) {
 		graph_report(_("the commit-graph file has incorrect checksum and is likely corrupt"));
 		verify_commit_graph_error = VERIFY_COMMIT_GRAPH_ERROR_HASH;
 	}
@@ -960,7 +978,7 @@ int verify_commit_graph(struct repository *r, struct commit_graph *g)
 			continue;
 		}
 
-		if (oidcmp(&get_commit_tree_in_graph_one(g, graph_commit)->object.oid,
+		if (!oideq(&get_commit_tree_in_graph_one(g, graph_commit)->object.oid,
 			   get_commit_tree_oid(odb_commit)))
 			graph_report("root tree OID for commit %s in commit-graph is %s != %s",
 				     oid_to_hex(&cur_oid),
@@ -977,7 +995,7 @@ int verify_commit_graph(struct repository *r, struct commit_graph *g)
 				break;
 			}
 
-			if (oidcmp(&graph_parents->item->object.oid, &odb_parents->item->object.oid))
+			if (!oideq(&graph_parents->item->object.oid, &odb_parents->item->object.oid))
 				graph_report("commit-graph parent for %s is %s != %s",
 					     oid_to_hex(&cur_oid),
 					     oid_to_hex(&graph_parents->item->object.oid),
